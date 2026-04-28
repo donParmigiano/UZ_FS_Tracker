@@ -1,112 +1,41 @@
 # Uzbekistan Banking and Financial Sector Intelligence Dashboard (MVP)
 
-> **Synthetic demo only**: This MVP is strictly for Uzbekistan and uses locally generated synthetic data. It does **not** scrape external websites.
+> **Synthetic demo only**: This MVP is scoped to Uzbekistan and uses locally generated synthetic data.
 
-## Overview
-This project provides an offline-first Streamlit dashboard foundation for Uzbekistan banking and financial sector intelligence.
+## Project purpose
+This project provides a beginner-friendly Streamlit dashboard foundation for Uzbekistan banking and financial sector analytics, with offline mock data generation and modular dashboard pages.
 
-## Installation
-1. Create and activate a virtual environment.
-2. Install dependencies:
+## Quick start
+1. Install dependencies:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Generate synthetic mock data
-Run:
+2. Generate mock data:
 
 ```bash
 python generate_mock_data.py
 ```
 
-This creates SQLite database `data/database/uz_banking_demo.sqlite` with:
-- 12 Uzbekistan banks
-- 14 Uzbekistan regions
-- 24 months of monthly data
-- Banking indicators: assets, loans, deposits, capital, net profit, ROA, ROE, NPL ratio, cost-to-income ratio, corporate loans, retail loans, SME loans, deposit rates, loan rates, payment transactions
-- Regional indicators: deposits, loans, active cards, payment volume
-
-## Run the dashboard
+3. Run the dashboard:
 
 ```bash
 streamlit run app.py
 ```
 
-If the database is missing, the app will show a clear instruction to run:
+## Documentation
+- [CBU April collector guide](docs/cbu_april_collector.md)
+- [Data architecture guide](docs/data_architecture.md)
 
-```bash
-python generate_mock_data.py
-```
-
-## April 2026 CBU banking stats test collector
-
-Run the collector test:
-
-```bash
-python collect_cbu_bankstats_test.py
-```
-
-Then run the dashboard and open the **CBU Banking Stats Test** tab:
-
-```bash
-streamlit run app.py
-```
-
-## 2026 YTD CBU banking stats collector
-
-Run the YTD collector (January-April 2026):
-
-```bash
-python collect_cbu_bankstats_ytd.py
-```
-
-Optional flags:
-
-```bash
-python collect_cbu_bankstats_ytd.py --parse-only
-python collect_cbu_bankstats_ytd.py --overwrite
-```
-
-Open the dashboard and use the **CBU Banking Stats YTD** tab to review outputs.
-
-
-## Build HTML preview
-
-```bash
-python build_preview.py
-```
-
-This creates `preview.html` so you can quickly open a visual demo in a browser without launching Streamlit.
-
-## Project structure
-
+## High-level folder structure
 ```text
 app.py
-build_preview.py
-generate_mock_data.py
+README.md
 requirements.txt
 config/sources.yaml
-data/raw/
-data/processed/
-data/database/
-logs/
-src/analytics/
-src/collectors/
-src/common/
-src/dashboard/
-src/database/
-src/parsers/
+collect_cbu_bankstats_test.py
+docs/
+data/
+src/
 ```
-
-## Limitations
-- Data is synthetic and not suitable for policy, investment, or risk decisions.
-- No live integrations with the Central Bank of Uzbekistan yet.
-- No ETL orchestration or production monitoring in this MVP.
-
-## Next steps for live Central Bank of Uzbekistan data
-- Add official source connectors in `src/collectors/`.
-- Build parser and validation logic in `src/parsers/`.
-- Add incremental ingestion jobs and data quality checks.
-- Introduce metadata lineage and update SLAs in `config/sources.yaml`.
-- Add authentication, role-based access, and export APIs.
