@@ -1,0 +1,32 @@
+project:
+  name: Uzbekistan Banking and Financial Sector Intelligence Dashboard
+  country_scope: Uzbekistan
+  mode: offline_demo_plus_cbu_test
+  synthetic_data_only: true
+  note: "Core dashboard values are synthetic demo data for prototyping only."
+
+sources:
+  - id: synthetic_bank_monthly
+    name: Synthetic Uzbekistan Bank Monthly Indicators
+    owner: Local generator
+    refresh_frequency: monthly
+    storage: data/database/uz_banking_demo.sqlite
+    table: bank_monthly
+    quality_status: demo
+
+  - id: synthetic_region_monthly
+    name: Synthetic Uzbekistan Regional Monthly Indicators
+    owner: Local generator
+    refresh_frequency: monthly
+    storage: data/database/uz_banking_demo.sqlite
+    table: region_monthly
+    quality_status: demo
+
+  - id: cbu_bankstats_april_2026_test
+    name: CBU Banking Statistics Report Files (April 2026 test)
+    owner: Central Bank of Uzbekistan
+    refresh_frequency: one_off_test
+    source_page: https://cbu.uz/en/statistics/bankstats/?arFilter_DATE_ACTIVE_FROM_1=&arFilter_DATE_ACTIVE_FROM_2=&arFilter_ff%5BSECTION_ID%5D=3497&year=2026&month=04&set_filter=&set_filter=Y
+    storage: data/database/uz_banking_demo.sqlite
+    table: cbu_bankstats_sources
+    quality_status: pilot_collection
