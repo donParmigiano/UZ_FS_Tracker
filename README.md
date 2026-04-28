@@ -39,6 +39,59 @@ If the database is missing, the app will show a clear instruction to run:
 python generate_mock_data.py
 ```
 
+## April 2026 CBU banking stats test collector
+
+Run the collector test:
+
+```bash
+python collect_cbu_bankstats_test.py
+```
+
+Optional modes:
+
+```bash
+python collect_cbu_bankstats_test.py --parse-only
+python collect_cbu_bankstats_test.py --overwrite
+```
+
+Notes:
+- Raw Excel files under `data/raw/cbu_bankstats/2026_04/` are the source of truth.
+- Parsed CSV files under `data/processed/cbu_bankstats/2026_04/` are audit/review outputs.
+- Parsed CSV exports keep high numeric precision (up to 12 decimal places).
+- Dashboard tables apply display rounding in the UI separately; this does not change stored CSV outputs.
+- Use `data/processed/cbu_bankstats_parse_qa_2026_04.csv` to validate sheet-level parsing QA metrics.
+
+Then run the dashboard and open the **CBU Banking Stats Test** tab:
+
+```bash
+streamlit run app.py
+```
+
+## 2026 YTD CBU banking stats collector (Jan-Apr)
+
+Run the year-to-date collector:
+
+```bash
+python collect_cbu_bankstats_ytd.py
+```
+
+Parse only existing raw files:
+
+```bash
+python collect_cbu_bankstats_ytd.py --parse-only
+```
+
+Overwrite existing raw/processed files:
+
+```bash
+python collect_cbu_bankstats_ytd.py --overwrite
+```
+
+Data layers:
+- `data/raw/cbu_bankstats/YYYY_MM/`: raw Excel source files from CBU (source of truth).
+- `data/processed/cbu_bankstats/YYYY_MM/`: parsed review CSV files and YTD inventory/summary/QA CSV outputs.
+- `data/master/cbu_bankstats_cells_master_2026_ytd.csv`: technical cell-level master combining parsed outputs across Jan-Apr 2026.
+
 ## Build HTML preview
 
 ```bash
