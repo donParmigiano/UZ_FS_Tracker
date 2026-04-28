@@ -39,6 +39,20 @@ If the database is missing, the app will show a clear instruction to run:
 python generate_mock_data.py
 ```
 
+## April 2026 CBU banking stats test collector
+
+Run the collector test:
+
+```bash
+python collect_cbu_bankstats_test.py
+```
+
+Then run the dashboard and open the **CBU Banking Stats Test** tab:
+
+```bash
+streamlit run app.py
+```
+
 ## Build HTML preview
 
 ```bash
