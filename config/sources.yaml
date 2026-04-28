@@ -1,0 +1,23 @@
+project:
+  name: Uzbekistan Banking and Financial Sector Intelligence Dashboard
+  country_scope: Uzbekistan
+  mode: offline_demo
+  synthetic_data_only: true
+  note: "All values in this MVP are synthetic demo data for prototyping only."
+
+sources:
+  - id: synthetic_bank_monthly
+    name: Synthetic Uzbekistan Bank Monthly Indicators
+    owner: Local generator
+    refresh_frequency: monthly
+    storage: data/database/uz_banking_demo.sqlite
+    table: bank_monthly
+    quality_status: demo
+
+  - id: synthetic_region_monthly
+    name: Synthetic Uzbekistan Regional Monthly Indicators
+    owner: Local generator
+    refresh_frequency: monthly
+    storage: data/database/uz_banking_demo.sqlite
+    table: region_monthly
+    quality_status: demo
