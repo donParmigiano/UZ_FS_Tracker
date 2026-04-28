@@ -53,6 +53,7 @@ tabs = st.tabs([
     "Payments and digital finance",
     "Data catalogue",
     "CBU Banking Stats Test",
+    "CBU Banking Stats YTD",
 ])
 
 with tabs[0]:
@@ -119,5 +120,35 @@ with tabs[7]:
         st.dataframe(inventory_df, use_container_width=True)
     except Exception:
         st.info("Inventory file not found yet. Run `python collect_cbu_bankstats_test.py` first.")
+
+
+with tabs[8]:
+    st.subheader("CBU Banking Stats YTD")
+    ytd_inventory_path = "data/processed/cbu_bankstats_inventory_2026_ytd.csv"
+    ytd_summary_path = "data/processed/cbu_bankstats_parse_summary_2026_ytd.csv"
+    ytd_qa_path = "data/processed/cbu_bankstats_parse_qa_2026_ytd.csv"
+
+    st.caption("This tab displays outputs from collect_cbu_bankstats_ytd.py.")
+
+    try:
+        ytd_summary_df = pd.read_csv(ytd_summary_path)
+        st.markdown("**YTD parse summary**")
+        st.dataframe(ytd_summary_df, use_container_width=True)
+    except Exception:
+        st.info("YTD parse summary not found yet. Run `python collect_cbu_bankstats_ytd.py` first.")
+
+    try:
+        ytd_inventory_df = pd.read_csv(ytd_inventory_path)
+        st.markdown("**YTD source inventory**")
+        st.dataframe(ytd_inventory_df, use_container_width=True)
+    except Exception:
+        st.info("YTD inventory file not found yet. Run `python collect_cbu_bankstats_ytd.py` first.")
+
+    try:
+        ytd_qa_df = pd.read_csv(ytd_qa_path)
+        st.markdown("**YTD parse QA**")
+        st.dataframe(ytd_qa_df, use_container_width=True)
+    except Exception:
+        st.info("YTD parse QA file not found yet. Run `python collect_cbu_bankstats_ytd.py` first.")
 
 st.caption(f"SQLite database path: {DB_PATH}")

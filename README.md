@@ -53,6 +53,24 @@ Then run the dashboard and open the **CBU Banking Stats Test** tab:
 streamlit run app.py
 ```
 
+## 2026 YTD CBU banking stats collector
+
+Run the YTD collector (January-April 2026):
+
+```bash
+python collect_cbu_bankstats_ytd.py
+```
+
+Optional flags:
+
+```bash
+python collect_cbu_bankstats_ytd.py --parse-only
+python collect_cbu_bankstats_ytd.py --overwrite
+```
+
+Open the dashboard and use the **CBU Banking Stats YTD** tab to review outputs.
+
+
 ## Build HTML preview
 
 ```bash
