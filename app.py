@@ -52,6 +52,7 @@ tabs = st.tabs([
     "Deposits and loans",
     "Payments and digital finance",
     "Data catalogue",
+    "CBU Banking Stats Test",
 ])
 
 with tabs[0]:
@@ -98,5 +99,25 @@ with tabs[6]:
     st.subheader("Data catalogue")
     st.info("All datasets listed below are synthetic and generated locally for demo use.")
     st.dataframe(catalog_df, use_container_width=True)
+
+with tabs[7]:
+    st.subheader("CBU Banking Stats Test")
+    inventory_path = "data/processed/cbu_bankstats_inventory_2026_04.csv"
+    summary_path = "data/processed/cbu_bankstats_parse_summary_2026_04.csv"
+    st.caption("This tab displays outputs from collect_cbu_bankstats_test.py.")
+
+    try:
+        summary_df = pd.read_csv(summary_path)
+        st.markdown("**Parse summary**")
+        st.dataframe(summary_df, use_container_width=True)
+    except Exception:
+        st.info("Parse summary not found yet. Run `python collect_cbu_bankstats_test.py` first.")
+
+    try:
+        inventory_df = pd.read_csv(inventory_path)
+        st.markdown("**Source inventory**")
+        st.dataframe(inventory_df, use_container_width=True)
+    except Exception:
+        st.info("Inventory file not found yet. Run `python collect_cbu_bankstats_test.py` first.")
 
 st.caption(f"SQLite database path: {DB_PATH}")
