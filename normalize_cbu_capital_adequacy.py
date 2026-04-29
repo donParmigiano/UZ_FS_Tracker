@@ -154,7 +154,7 @@ def parse_date_header(raw: object) -> tuple[str, str]:
         return "", ""
     if isinstance(raw, (datetime, date)):
         dt = raw.date() if isinstance(raw, datetime) else raw
-        return dt.isoformat(), dt.strftime("%B %-d, %Y")
+        return dt.isoformat(), f"{dt.strftime('%B')} {dt.day}, {dt.year}"
     text = clean_text(raw)
     if not text:
         return "", ""
@@ -162,7 +162,7 @@ def parse_date_header(raw: object) -> tuple[str, str]:
     for fmt in ("%B %d, %Y", "%B %d %Y", "%d.%m.%Y", "%Y-%m-%d"):
         try:
             dt = datetime.strptime(text, fmt).date()
-            return dt.isoformat(), dt.strftime("%B %-d, %Y")
+            return dt.isoformat(), f"{dt.strftime('%B')} {dt.day}, {dt.year}"
         except ValueError:
             continue
     return "", text
