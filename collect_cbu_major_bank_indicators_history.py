@@ -27,8 +27,6 @@ BANKSTATS_PATH = "/en/statistics/bankstats/"
 SECTION_ID = "3497"
 DEFAULT_FILTER_YEAR = 2026
 DEFAULT_FILTER_MONTH = 1
-CORE_PHRASE = "information on major indicators of commercial banks"
-LEGACY_HINT = "in the context of banks"
 RAW_ROOT = Path("data/raw/cbu_bankstats")
 REPORT_PATH = Path("data/processed/cbu_major_bank_indicators_collection_report.csv")
 SUMMARY_PATH = Path("data/processed/cbu_major_bank_indicators_collection_summary.csv")
@@ -42,7 +40,6 @@ class CollectionRow:
     listing_url: str
     report_page_url: str
     report_title_detected: str
-    matched_core_phrase: str
     excel_file_url: str
     local_file_path: str
     status: str
@@ -114,17 +111,6 @@ def build_listing_url(year: int, month: int) -> str:
     return f"{BASE_URL}{BANKSTATS_PATH}?{urlencode(query_items)}"
 
 
-def normalize_text(value: str) -> str:
-    return " ".join(value.lower().split())
-
-
-def page_matches(text: str) -> bool:
-    normalized = normalize_text(text)
-    normalized = normalized.replace(normalize_text(LEGACY_HINT), "")
-    normalized = re.sub(r"\b(as of|for|from|to|on)\b.*", "", normalized).strip()
-    return CORE_PHRASE in normalized
-
-
 def is_valid_report_page(url: str) -> bool:
     path = urlparse(url).path
     return bool(re.fullmatch(r"/(?:en/)?statistics/bankstats/\d+/", path))
@@ -135,7 +121,11 @@ def extract_candidate_report_links(listing_html: str, listing_url: str) -> list[
     results: set[str] = set()
     for a_tag in soup.find_all("a", href=True):
         href = a_tag.get("href", "")
-        full_url = urljoin(BASE_URL, href)
+        full_url = urljoin(listing_url, href)
+        if is_valid_report_page(full_url):
+            results.add(full_url)
+    for match in re.findall(r"""(?:"|')(\/(?:en\/)?statistics\/bankstats\/\d+\/)(?:\?|#|(?:"|'))""", listing_html):
+        full_url = urljoin(listing_url, match)
         if is_valid_report_page(full_url):
             results.add(full_url)
     found = sorted(results)
@@ -154,12 +144,9 @@ def extract_page_title(soup: BeautifulSoup) -> str:
     return ""
 
 
-def extract_excel_links(page_html: str, page_url: str) -> tuple[str, list[str], bool]:
+def extract_excel_links(page_html: str, page_url: str) -> tuple[str, list[str]]:
     soup = BeautifulSoup(page_html, "html.parser")
     page_title = extract_page_title(soup)
-    body_text = soup.get_text(" ", strip=True)
-    matched = page_matches(f"{page_title} {body_text}")
-
     excel_links: set[str] = set()
     for a_tag in soup.find_all("a", href=True):
         href = a_tag.get("href", "")
@@ -168,10 +155,10 @@ def extract_excel_links(page_html: str, page_url: str) -> tuple[str, list[str], 
         if path.endswith(".xlsx") or path.endswith(".xls"):
             excel_links.add(full)
     if not excel_links:
-        for match in re.findall(r"""https?://[^\s"'<>]+?\.(?:xlsx|xls)\b""", page_html, flags=re.IGNORECASE):
-            excel_links.add(match)
+        for match in re.findall(r"""(?:"|')(https?://[^\s"'<>]+?\.(?:xlsx|xls)(?:\?[^\s"'<>]*)?|/(?:[^\s"'<>]+?\.xls(?:x)?(?:\?[^\s"'<>]*)?))(?:["'])""", page_html, flags=re.IGNORECASE):
+            excel_links.add(urljoin(page_url, match))
 
-    return page_title, sorted(excel_links), matched
+    return page_title, sorted(excel_links)
 
 
 def filename_from_url(url: str) -> str:
@@ -192,7 +179,7 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
         listing_html = fetch_text(session, listing_url)
     except Exception as exc:  # noqa: BLE001
         return [
-            CollectionRow(year, month, period, listing_url, "", "", "no", "", "", "error", str(exc), now)
+            CollectionRow(year, month, period, listing_url, "", "", "", "", "error", str(exc), now)
         ]
 
     candidates = extract_candidate_report_links(listing_html, listing_url)
@@ -201,10 +188,7 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
     for page_url in candidates:
         try:
             page_html = fetch_text(session, page_url)
-            page_title, excel_links, matched = extract_excel_links(page_html, page_url)
-            print(f"[PAGE] url={page_url} matched_core_phrase={matched}")
-            if not matched:
-                continue
+            page_title, excel_links = extract_excel_links(page_html, page_url)
             print(f"[PAGE] url={page_url} excel_links_found={len(excel_links)}")
             if not excel_links:
                 rows.append(
@@ -215,7 +199,6 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                         listing_url,
                         page_url,
                         page_title,
-                        "yes",
                         "",
                         "",
                         "no_excel_found",
@@ -239,7 +222,6 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                             listing_url,
                             page_url,
                             page_title,
-                            "yes",
                             file_url,
                             str(local_path),
                             "skipped_existing",
@@ -260,7 +242,6 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                             listing_url,
                             page_url,
                             page_title,
-                            "yes",
                             file_url,
                             str(local_path),
                             "downloaded",
@@ -278,7 +259,6 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                             listing_url,
                             page_url,
                             page_title,
-                            "yes",
                             file_url,
                             str(local_path),
                             "error",
@@ -296,7 +276,6 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                     listing_url,
                     page_url,
                     "",
-                    "no",
                     "",
                     "",
                     "error",
@@ -306,7 +285,7 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
             )
 
     if not rows:
-        rows.append(CollectionRow(year, month, period, listing_url, "", "", "no", "", "", "no_match", "", now))
+        rows.append(CollectionRow(year, month, period, listing_url, "", "", "", "", "no_report_pages", "", now))
     return rows
 
 
@@ -322,7 +301,6 @@ def write_report(rows: list[CollectionRow]) -> None:
                 "listing_url",
                 "report_page_url",
                 "report_title_detected",
-                "matched_core_phrase",
                 "excel_file_url",
                 "local_file_path",
                 "status",
@@ -339,7 +317,6 @@ def write_report(rows: list[CollectionRow]) -> None:
                     row.listing_url,
                     row.report_page_url,
                     row.report_title_detected,
-                    row.matched_core_phrase,
                     row.excel_file_url,
                     row.local_file_path,
                     row.status,
@@ -351,8 +328,9 @@ def write_report(rows: list[CollectionRow]) -> None:
 
 def write_summary(rows: list[CollectionRow], started_at: str, finished_at: str) -> None:
     periods = {(r.period_year, r.period_month) for r in rows}
-    matching_pages = {r.report_page_url for r in rows if r.report_page_url and r.matched_core_phrase == "yes"}
-    excel_found = sum(1 for r in rows if r.excel_file_url)
+    report_pages_found = {r.report_page_url for r in rows if r.report_page_url}
+    report_pages_visited = {r.report_page_url for r in rows if r.report_page_url and r.status != "listing_only"}
+    excel_found = sum(1 for r in rows if r.excel_file_url or r.status == "no_excel_found")
     downloaded = sum(1 for r in rows if r.status == "downloaded")
     skipped = sum(1 for r in rows if r.status == "skipped_existing")
     errors = sum(1 for r in rows if r.status == "error")
@@ -363,7 +341,8 @@ def write_summary(rows: list[CollectionRow], started_at: str, finished_at: str) 
         writer.writerow(
             [
                 "total_months_scanned",
-                "total_matching_report_pages_found",
+                "total_report_pages_found",
+                "total_report_pages_visited",
                 "total_excel_files_found",
                 "total_excel_files_downloaded",
                 "total_excel_files_skipped_existing",
@@ -372,7 +351,7 @@ def write_summary(rows: list[CollectionRow], started_at: str, finished_at: str) 
                 "run_finished_at",
             ]
         )
-        writer.writerow([len(periods), len(matching_pages), excel_found, downloaded, skipped, errors, started_at, finished_at])
+        writer.writerow([len(periods), len(report_pages_found), len(report_pages_visited), excel_found, downloaded, skipped, errors, started_at, finished_at])
 
 
 def main() -> None:
