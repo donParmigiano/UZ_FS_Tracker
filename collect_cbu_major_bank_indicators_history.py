@@ -10,13 +10,14 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
-from urllib.parse import parse_qs, quote_plus, urlencode, urljoin, urlparse
+from urllib.parse import quote_plus, urlencode, urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -24,6 +25,8 @@ from bs4 import BeautifulSoup
 BASE_URL = "https://cbu.uz"
 BANKSTATS_PATH = "/en/statistics/bankstats/"
 SECTION_ID = "3497"
+DEFAULT_FILTER_YEAR = 2026
+DEFAULT_FILTER_MONTH = 1
 CORE_PHRASE = "information on major indicators of commercial banks"
 LEGACY_HINT = "in the context of banks"
 RAW_ROOT = Path("data/raw/cbu_bankstats")
@@ -95,9 +98,20 @@ def fetch_bytes(session: requests.Session, url: str, timeout: float = 20.0, retr
 
 def build_listing_url(year: int, month: int) -> str:
     month_str = f"{month:02d}"
-    filter_month = f"01.{month_str}.{year}"
-    query = urlencode({"arFilter_ff[SECTION_ID]": SECTION_ID, "date": filter_month})
-    return f"{BASE_URL}{BANKSTATS_PATH}?{query}"
+    next_year = year + 1 if month == 12 else year
+    next_month = 1 if month == 12 else month + 1
+    query_items = [
+        ("year", f"{DEFAULT_FILTER_YEAR:04d}"),
+        ("month", f"{DEFAULT_FILTER_MONTH:02d}"),
+        ("arFilter_DATE_ACTIVE_FROM_1", f"01.{month_str}.{year:04d}"),
+        ("arFilter_DATE_ACTIVE_FROM_2", f"01.{next_month:02d}.{next_year:04d}"),
+        ("arFilter_ff[SECTION_ID]", SECTION_ID),
+        ("year", f"{year:04d}"),
+        ("month", month_str),
+        ("set_filter", ""),
+        ("set_filter", "Y"),
+    ]
+    return f"{BASE_URL}{BANKSTATS_PATH}?{urlencode(query_items)}"
 
 
 def normalize_text(value: str) -> str:
@@ -106,7 +120,14 @@ def normalize_text(value: str) -> str:
 
 def page_matches(text: str) -> bool:
     normalized = normalize_text(text)
+    normalized = normalized.replace(normalize_text(LEGACY_HINT), "")
+    normalized = re.sub(r"\b(as of|for|from|to|on)\b.*", "", normalized).strip()
     return CORE_PHRASE in normalized
+
+
+def is_valid_report_page(url: str) -> bool:
+    path = urlparse(url).path
+    return bool(re.fullmatch(r"/(?:en/)?statistics/bankstats/\d+/", path))
 
 
 def extract_candidate_report_links(listing_html: str, listing_url: str) -> list[str]:
@@ -114,11 +135,14 @@ def extract_candidate_report_links(listing_html: str, listing_url: str) -> list[
     results: set[str] = set()
     for a_tag in soup.find_all("a", href=True):
         href = a_tag.get("href", "")
-        title = a_tag.get_text(" ", strip=True)
         full_url = urljoin(BASE_URL, href)
-        if page_matches(title):
+        if is_valid_report_page(full_url):
             results.add(full_url)
-    return sorted(results)
+    found = sorted(results)
+    print(f"[SCAN] listing={listing_url}")
+    print(f"[SCAN] report_pages_found={len(found)}")
+    print(f"[SCAN] report_page_urls={found}")
+    return found
 
 
 def extract_page_title(soup: BeautifulSoup) -> str:
@@ -143,6 +167,9 @@ def extract_excel_links(page_html: str, page_url: str) -> tuple[str, list[str], 
         path = urlparse(full).path.lower()
         if path.endswith(".xlsx") or path.endswith(".xls"):
             excel_links.add(full)
+    if not excel_links:
+        for match in re.findall(r"""https?://[^\s"'<>]+?\.(?:xlsx|xls)\b""", page_html, flags=re.IGNORECASE):
+            excel_links.add(match)
 
     return page_title, sorted(excel_links), matched
 
@@ -175,8 +202,10 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
         try:
             page_html = fetch_text(session, page_url)
             page_title, excel_links, matched = extract_excel_links(page_html, page_url)
+            print(f"[PAGE] url={page_url} matched_core_phrase={matched}")
             if not matched:
                 continue
+            print(f"[PAGE] url={page_url} excel_links_found={len(excel_links)}")
             if not excel_links:
                 rows.append(
                     CollectionRow(
