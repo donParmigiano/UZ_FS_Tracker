@@ -17,7 +17,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-from urllib.parse import parse_qs, urlencode, urljoin, urlparse
+from urllib.parse import parse_qs, unquote, urlencode, urljoin, urlparse
 
 import pandas as pd
 import requests
@@ -113,18 +113,32 @@ def discover_report_pages(session: requests.Session, year: int, month: int) -> l
     return sorted(report_urls)
 
 
+def _is_excel_link(value: str) -> bool:
+    cleaned = value.strip().strip("\"'<>")
+    if not cleaned:
+        return False
+
+    parsed = urlparse(cleaned)
+    path = unquote(parsed.path).lower()
+    return path.endswith(".xlsx") or path.endswith(".xls")
+
+
 def discover_excel_links(session: requests.Session, report_url: str) -> list[str]:
     soup = fetch_html(session, report_url)
     links: set[str] = set()
 
     for a_tag in soup.select("a[href]"):
         href = a_tag.get("href", "").strip()
-        if not href:
+        if not href or not _is_excel_link(href):
             continue
-        absolute = urljoin(BASE_URL, href)
-        lowered = absolute.lower()
-        if lowered.endswith(".xlsx") or lowered.endswith(".xls"):
-            links.add(absolute)
+        links.add(urljoin(report_url, href))
+
+    html = soup.decode()
+    excel_pattern = re.compile(r"(?:https?://|/|\.\.?/)[^\s\"'<>]+?\.xls(?:x)?(?:\?[^\s\"'<>]*)?", re.IGNORECASE)
+    for candidate in excel_pattern.findall(html):
+        if not _is_excel_link(candidate):
+            continue
+        links.add(urljoin(report_url, candidate.strip()))
 
     return sorted(links)
 
@@ -269,6 +283,10 @@ def main() -> int:
         except Exception as exc:
             print(f"Warning: failed to scan report page {report_url}: {exc}")
             continue
+
+        print(f"Excel links found on report page {report_url}: {len(excel_links)}")
+        if not excel_links:
+            print(f"Warning: no Excel links found on report page: {report_url}")
 
         for file_url in excel_links:
             file_name = safe_filename(file_url, file_name_used)
