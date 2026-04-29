@@ -115,18 +115,6 @@ def parse_number(value: object) -> Optional[float]:
         return None
 
 
-def classify_row(label: str) -> tuple[str, str]:
-    lowered = label.lower()
-    # Beginner-friendly heuristics:
-    # - all-caps or words like "group" often indicate a group heading
-    # - otherwise treat it as bank-level when possible
-    if not label:
-        return "needs_review", "needs_review"
-    if label.isupper() or "group" in lowered or "state-owned" in lowered:
-        return label, ""
-    return "", label
-
-
 def parse_workbook(file_path: Path, loaded_at: str) -> tuple[list[ParsedRow], QAEntry]:
     year, month, period = find_period_from_path(file_path)
     if year is None or month is None or period is None:
@@ -158,18 +146,20 @@ def parse_workbook(file_path: Path, loaded_at: str) -> tuple[list[ParsedRow], QA
         "J": ("deposits", "share", "percent"),
     }
 
+    recognized_group_titles = {
+        "banks with state ownership",
+        "other banks",
+    }
+    current_bank_group = ""
+
     for row_idx in range(1, sheet.max_row + 1):
-        label = clean_text(sheet[f"B{row_idx}"].value)
-        if not label:
+        column_a_text = clean_text(sheet[f"A{row_idx}"].value)
+        if column_a_text and column_a_text.lower() in recognized_group_titles:
+            current_bank_group = column_a_text
+
+        bank_name = clean_text(sheet[f"B{row_idx}"].value)
+        if not bank_name:
             continue
-
-        # Skip obvious header rows.
-        lower_label = label.lower()
-        if any(token in lower_label for token in ["bank", "assets", "loans", "capital", "deposits", "share"]):
-            if row_idx <= 20:
-                continue
-
-        bank_group, bank_name = classify_row(label)
 
         row_created = 0
         for col_letter, (indicator, metric_type, unit) in column_map.items():
@@ -183,8 +173,8 @@ def parse_workbook(file_path: Path, loaded_at: str) -> tuple[list[ParsedRow], QA
                     period_year=year,
                     period_month=month,
                     period=period,
-                    bank_group=bank_group if bank_group else "",
-                    bank_name=bank_name if bank_name else "",
+                    bank_group=current_bank_group,
+                    bank_name=bank_name,
                     indicator=indicator,
                     metric_type=metric_type,
                     value=number,
