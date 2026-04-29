@@ -28,6 +28,7 @@ BANKSTATS_SECTION_FILTER = "3497"
 TEST_MONTH_URL = "https://cbu.uz/en/statistics/bankstats/978060/"
 USER_AGENT = "Mozilla/5.0 (compatible; cbu-bankstats-month-collector/1.0)"
 TIMEOUT_SECONDS = 30
+REPORT_PAGE_PATTERN = re.compile(r"^https?://[^/]+/en/statistics/bankstats/\d+/$", re.IGNORECASE)
 
 
 @dataclass
@@ -91,6 +92,8 @@ def discover_report_pages(session: requests.Session, year: int, month: int) -> l
 
     for listing_url in urls_to_visit:
         print(f"Scanning listing page: {listing_url}")
+        if listing_url == TEST_MONTH_URL and REPORT_PAGE_PATTERN.match(listing_url):
+            report_urls.add(listing_url)
         try:
             soup = fetch_html(session, listing_url)
         except Exception as exc:
@@ -101,16 +104,18 @@ def discover_report_pages(session: requests.Session, year: int, month: int) -> l
             href = a_tag.get("href", "").strip()
             if not href:
                 continue
-            absolute = urljoin(BASE_URL, href)
-            if "/statistics/bankstats/" not in absolute:
-                continue
+            absolute = urljoin(BASE_URL, href).split("#")[0]
             if absolute.endswith((".xlsx", ".xls")):
                 continue
-            if not looks_like_month(absolute, year, month) and listing_url != TEST_MONTH_URL:
+            if not REPORT_PAGE_PATTERN.match(absolute):
                 continue
-            report_urls.add(absolute.split("#")[0])
+            if listing_url != TEST_MONTH_URL and not looks_like_month(absolute, year, month):
+                continue
+            report_urls.add(absolute)
 
-    return sorted(report_urls)
+    final_report_urls = sorted(report_urls)
+    print(f"Final report pages list: {final_report_urls}")
+    return final_report_urls
 
 
 def _is_excel_link(value: str) -> bool:
