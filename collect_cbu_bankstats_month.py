@@ -49,8 +49,8 @@ def parse_args() -> argparse.Namespace:
 def validate_inputs(year: int, month: int) -> None:
     if month < 1 or month > 12:
         raise ValueError("Month must be from 1 to 12.")
-    if (year, month) < (2023, 4):
-        raise ValueError("Supported start month is April 2023 (2023-04).")
+    if (year, month) < (2018, 1):
+    raise ValueError("Supported start month is January 2018 (2018-01).")
 
 
 def month_slug(year: int, month: int) -> str:
