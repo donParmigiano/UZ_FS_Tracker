@@ -49,7 +49,7 @@ class CollectionRow:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Collect historical CBU major bank indicator files.")
-    parser.add_argument("--year-start", type=int, default=2019)
+    parser.add_argument("--year-start", type=int, default=2018)
     parser.add_argument("--year-end", type=int, default=datetime.now(timezone.utc).year)
     parser.add_argument("--workers", type=int, default=5)
     parser.add_argument("--overwrite", action="store_true")
