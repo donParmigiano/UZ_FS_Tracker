@@ -59,6 +59,11 @@ class QAEntry:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Parse CBU capital adequacy Excel reports.")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing output files if they already exist.")
+    parser.add_argument(
+        "--periods",
+        type=str,
+        help="Comma-separated YYYY_MM folders to parse under data/raw/cbu_bankstats (e.g. 2026_04,2024_04).",
+    )
     return parser.parse_args()
 
 
@@ -97,6 +102,21 @@ def find_input_files(root_dir: Path) -> list[Path]:
         if FILE_NAME_CORE_PHRASE in path.name.lower():
             files.append(path)
     return sorted(files)
+
+
+def parse_periods_arg(periods_arg: Optional[str]) -> list[str]:
+    if not periods_arg:
+        return []
+    periods = [part.strip() for part in periods_arg.split(",") if part.strip()]
+    pattern = re.compile(r"^\d{4}_(0[1-9]|1[0-2])$")
+    invalid = [p for p in periods if not pattern.match(p)]
+    if invalid:
+        raise SystemExit(
+            "Invalid --periods value(s): "
+            + ", ".join(invalid)
+            + ". Expected comma-separated YYYY_MM values (e.g. 2026_04,2024_04)."
+        )
+    return periods
 
 
 def infer_period_folder(file_path: Path) -> tuple[Optional[int], Optional[int], str]:
@@ -266,7 +286,20 @@ def main() -> None:
             f"{MASTER_OUTPUT} / {QA_OUTPUT}"
         )
 
-    files = find_input_files(RAW_ROOT)
+    requested_periods = parse_periods_arg(args.periods)
+    warnings: list[str] = []
+
+    if requested_periods:
+        files: list[Path] = []
+        for period in requested_periods:
+            period_dir = RAW_ROOT / period
+            if not period_dir.exists() or not period_dir.is_dir():
+                warnings.append(f"Requested period folder does not exist: {period_dir}")
+                continue
+            files.extend(find_input_files(period_dir))
+    else:
+        files = find_input_files(RAW_ROOT)
+
     if not files:
         raise SystemExit(f"No input files found under {RAW_ROOT} matching '*{FILE_NAME_CORE_PHRASE}*.xlsx'.")
 
@@ -279,11 +312,26 @@ def main() -> None:
         all_rows.extend(parsed)
         qa_rows.append(qa)
 
+    for warning in warnings:
+        qa_rows.append(
+            QAEntry(
+                source_file="",
+                report_period_folder="",
+                source_sheet="",
+                rows_read=0,
+                output_rows_created=0,
+                status="warning",
+                notes=warning,
+            )
+        )
+
     write_master(all_rows, MASTER_OUTPUT)
     write_qa(qa_rows, QA_OUTPUT)
     print(f"Parsed {len(files)} files -> {len(all_rows)} rows")
     print(f"Master: {MASTER_OUTPUT}")
     print(f"QA: {QA_OUTPUT}")
+    for warning in warnings:
+        print(f"WARNING: {warning}")
 
 
 if __name__ == "__main__":
