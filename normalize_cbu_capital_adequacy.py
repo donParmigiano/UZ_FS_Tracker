@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from openpyxl import load_workbook
+from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 
@@ -202,7 +203,7 @@ def parse_workbook(file_path: Path, loaded_at: str) -> tuple[list[ParsedRow], QA
 
         row_created = 0
         for col_idx in range(2, max_col + 1):
-            col_letter = sheet.cell(row=1, column=col_idx).column_letter
+            col_letter = get_column_letter(col_idx)
             value_ref = f"{col_letter}{row_idx}"
             raw_value, source_cell = get_effective_value(sheet, value_ref, merged_lookup)
             num = parse_number(raw_value)
@@ -244,7 +245,7 @@ def parse_workbook(file_path: Path, loaded_at: str) -> tuple[list[ParsedRow], QA
             row_created += 1
 
         if row_created == 0:
-            notes.append(f"Indicator row A{row_idx} had no numeric cells in B:{sheet.cell(row=1, column=max_col).column_letter}.")
+            notes.append(f"Indicator row A{row_idx} had no numeric cells in B:{get_column_letter(max_col)}.")
         else:
             rows_read += 1
 
