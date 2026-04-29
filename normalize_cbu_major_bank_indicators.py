@@ -21,7 +21,7 @@ from openpyxl import load_workbook
 RAW_ROOT = Path("data/raw/cbu_bankstats")
 MASTER_OUTPUT = Path("data/master/cbu_major_bank_indicators_master.csv")
 QA_OUTPUT = Path("data/master/cbu_major_bank_indicators_parse_qa.csv")
-FILE_NAME_TOKEN = "Information-on-major-indicators-of-commercial-banks"
+FILE_NAME_CORE_PHRASE = "information on major indicators of commercial banks"
 
 
 @dataclass
@@ -69,7 +69,8 @@ def find_input_files(root_dir: Path) -> list[Path]:
         suffix = path.suffix.lower()
         if suffix not in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
             continue
-        if FILE_NAME_TOKEN.lower() in path.name.lower():
+        normalized_name = path.stem.replace('-', ' ').replace('_', ' ').lower()
+        if FILE_NAME_CORE_PHRASE in normalized_name:
             matching.append(path)
     return sorted(matching)
 
@@ -270,7 +271,7 @@ def main() -> None:
     if not files:
         raise SystemExit(
             "No matching Excel files found under data/raw/cbu_bankstats/ with filename containing "
-            f"'{FILE_NAME_TOKEN}'."
+            f"'{FILE_NAME_CORE_PHRASE}'."
         )
 
     loaded_at = datetime.now(timezone.utc).isoformat()
