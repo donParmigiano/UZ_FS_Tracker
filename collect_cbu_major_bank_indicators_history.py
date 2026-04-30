@@ -665,6 +665,8 @@ def write_summary(rows: list[CollectionRow], started_at: str, finished_at: str) 
     downloaded = sum(1 for r in rows if r.status == "downloaded")
     skipped = sum(1 for r in rows if r.status == "skipped_existing")
     errors = sum(1 for r in rows if r.status == "error")
+    html_fallbacks_created = sum(1 for r in rows if r.status == "html_fallback_created")
+    html_fallbacks_skipped_existing = sum(1 for r in rows if r.status == "html_fallback_skipped_existing")
 
     SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
     with SUMMARY_PATH.open("w", newline="", encoding="utf-8") as f:
@@ -678,11 +680,25 @@ def write_summary(rows: list[CollectionRow], started_at: str, finished_at: str) 
                 "total_excel_files_downloaded",
                 "total_excel_files_skipped_existing",
                 "total_errors",
+                "total_html_fallbacks_created",
+                "total_html_fallbacks_skipped_existing",
                 "run_started_at",
                 "run_finished_at",
             ]
         )
-        writer.writerow([len(periods), len(report_pages_found), len(report_pages_visited), excel_found, downloaded, skipped, errors, started_at, finished_at])
+        writer.writerow([
+            len(periods),
+            len(report_pages_found),
+            len(report_pages_visited),
+            excel_found,
+            downloaded,
+            skipped,
+            errors,
+            html_fallbacks_created,
+            html_fallbacks_skipped_existing,
+            started_at,
+            finished_at,
+        ])
 
 
 def main() -> None:
