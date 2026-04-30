@@ -48,7 +48,7 @@ class CollectionRow:
     local_file_path: str
     status: str
     error_message: str
-    collected_at: str
+    collected_at: str = ""
 
 
 def parse_args() -> argparse.Namespace:
