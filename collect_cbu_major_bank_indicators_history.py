@@ -113,13 +113,35 @@ def select_largest_html_table(page_html: str) -> Optional[pd.DataFrame]:
     try:
         tables = pd.read_html(page_html)
     except Exception:  # noqa: BLE001
-        return None
-    if not tables:
-        return None
+        tables = []
     valid_tables = [df for df in tables if not df.empty and df.shape[0] > 0 and df.shape[1] > 0]
-    if not valid_tables:
-        return None
-    return max(valid_tables, key=lambda df: df.shape[0] * df.shape[1])
+    if valid_tables:
+        return max(valid_tables, key=lambda df: df.shape[0] * df.shape[1])
+
+    soup = BeautifulSoup(page_html, "html.parser")
+    best_df: Optional[pd.DataFrame] = None
+    best_score = 0
+    for table in soup.find_all("table"):
+        rows_data: list[list[str]] = []
+        for tr in table.find_all("tr"):
+            cells = tr.find_all(["th", "td"])
+            row = [cell.get_text(" ", strip=True) for cell in cells]
+            if any(cell for cell in row):
+                rows_data.append(row)
+        if not rows_data:
+            continue
+        max_cols = max(len(r) for r in rows_data)
+        if max_cols == 0:
+            continue
+        normalized_rows = [r + [""] * (max_cols - len(r)) for r in rows_data]
+        candidate_df = pd.DataFrame(normalized_rows)
+        if candidate_df.empty:
+            continue
+        score = candidate_df.shape[0] * candidate_df.shape[1]
+        if score > best_score:
+            best_score = score
+            best_df = candidate_df
+    return best_df
 
 
 def build_listing_url(year: int, month: int) -> str:
@@ -208,7 +230,22 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
         listing_html = fetch_text(session, listing_url)
     except Exception as exc:  # noqa: BLE001
         return [
-            CollectionRow(year, month, period, listing_url, "", "", "", "", "", "", "error", str(exc), now)
+            CollectionRow(
+                period_year=year,
+                period_month=month,
+                period=period,
+                listing_url=listing_url,
+                report_page_url="",
+                report_title_detected="",
+                excel_file_url="",
+                source_method="",
+                html_fallback_status="",
+                html_fallback_path="",
+                local_file_path="",
+                status="error",
+                error_message=str(exc),
+                collected_at=now,
+            )
         ]
 
     candidates = extract_candidate_report_links(listing_html, listing_url)
@@ -222,20 +259,20 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
             if not excel_links:
                 rows.append(
                     CollectionRow(
-                        year,
-                        month,
-                        period,
-                        listing_url,
-                        page_url,
-                        page_title,
-                        "",
-                        "",
-                        "",
-                        "",
-                        "",
-                        "no_excel_found",
-                        "No .xls/.xlsx link found on report page.",
-                        now,
+                        period_year=year,
+                        period_month=month,
+                        period=period,
+                        listing_url=listing_url,
+                        report_page_url=page_url,
+                        report_title_detected=page_title,
+                        excel_file_url="",
+                        source_method="",
+                        html_fallback_status="",
+                        html_fallback_path="",
+                        local_file_path="",
+                        status="no_excel_found",
+                        error_message="No .xls/.xlsx link found on report page.",
+                        collected_at=now,
                     )
                 )
                 continue
@@ -248,20 +285,20 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                 if local_path.exists() and not overwrite:
                     rows.append(
                         CollectionRow(
-                            year,
-                            month,
-                            period,
-                            listing_url,
-                            page_url,
-                            page_title,
-                            file_url,
-                            "excel_download",
-                            "",
-                            "",
-                            str(local_path),
-                            "skipped_existing",
-                            "",
-                            now,
+                            period_year=year,
+                            period_month=month,
+                            period=period,
+                            listing_url=listing_url,
+                            report_page_url=page_url,
+                            report_title_detected=page_title,
+                            excel_file_url=file_url,
+                            source_method="excel_download",
+                            html_fallback_status="",
+                            html_fallback_path="",
+                            local_file_path=str(local_path),
+                            status="skipped_existing",
+                            error_message="",
+                            collected_at=now,
                         )
                     )
                     continue
@@ -271,20 +308,20 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                     local_path.write_bytes(blob)
                     rows.append(
                         CollectionRow(
-                            year,
-                            month,
-                            period,
-                            listing_url,
-                            page_url,
-                            page_title,
-                            file_url,
-                            "excel_download",
-                            "",
-                            "",
-                            str(local_path),
-                            "downloaded",
-                            "",
-                            now,
+                            period_year=year,
+                            period_month=month,
+                            period=period,
+                            listing_url=listing_url,
+                            report_page_url=page_url,
+                            report_title_detected=page_title,
+                            excel_file_url=file_url,
+                            source_method="excel_download",
+                            html_fallback_status="",
+                            html_fallback_path="",
+                            local_file_path=str(local_path),
+                            status="downloaded",
+                            error_message="",
+                            collected_at=now,
                         )
                     )
                     time.sleep(0.2)
@@ -300,19 +337,20 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                     if fallback_df is None:
                         rows.append(
                             CollectionRow(
-                                year,
-                                month,
-                                period,
-                                listing_url,
-                                page_url,
-                                page_title,
-                                file_url,
-                                "html_table_fallback",
-                                "no_html_table_found",
-                                "",
-                                "no_html_table_found",
-                                f"Excel download failed ({download_exc}); no HTML table available.",
-                                now,
+                                period_year=year,
+                                period_month=month,
+                                period=period,
+                                listing_url=listing_url,
+                                report_page_url=page_url,
+                                report_title_detected=page_title,
+                                excel_file_url=file_url,
+                                source_method="html_table_fallback",
+                                html_fallback_status="no_html_table_found",
+                                html_fallback_path="",
+                                local_file_path="",
+                                status="no_html_table_found",
+                                error_message=f"Excel download failed ({download_exc}); no HTML table available.",
+                                collected_at=now,
                             )
                         )
                         continue
@@ -320,19 +358,20 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                     if fallback_path.exists() and not overwrite:
                         rows.append(
                             CollectionRow(
-                                year,
-                                month,
-                                period,
-                                listing_url,
-                                page_url,
-                                page_title,
-                                file_url,
-                                "html_table_fallback",
-                                "existing",
-                                str(fallback_path),
-                                "html_fallback_skipped_existing",
-                                "",
-                                now,
+                                period_year=year,
+                                period_month=month,
+                                period=period,
+                                listing_url=listing_url,
+                                report_page_url=page_url,
+                                report_title_detected=page_title,
+                                excel_file_url=file_url,
+                                source_method="html_table_fallback",
+                                html_fallback_status="existing",
+                                html_fallback_path=str(fallback_path),
+                                local_file_path=str(fallback_path),
+                                status="html_fallback_skipped_existing",
+                                error_message=f"Excel download failed ({download_exc}); reused existing HTML fallback file.",
+                                collected_at=now,
                             )
                         )
                         continue
@@ -342,62 +381,81 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                         err_suffix = f" (excel_http_status={status_code})" if status_code == 404 else ""
                         rows.append(
                             CollectionRow(
-                                year,
-                                month,
-                                period,
-                                listing_url,
-                                page_url,
-                                page_title,
-                                file_url,
-                                "html_table_fallback",
-                                "created",
-                                str(fallback_path),
-                                "html_fallback_created",
-                                f"Excel download failed ({download_exc}){err_suffix}",
-                                now,
+                                period_year=year,
+                                period_month=month,
+                                period=period,
+                                listing_url=listing_url,
+                                report_page_url=page_url,
+                                report_title_detected=page_title,
+                                excel_file_url=file_url,
+                                source_method="html_table_fallback",
+                                html_fallback_status="created",
+                                html_fallback_path=str(fallback_path),
+                                local_file_path=str(fallback_path),
+                                status="html_fallback_created",
+                                error_message=f"Excel download failed ({download_exc}){err_suffix}; created fallback from HTML table.",
+                                collected_at=now,
                             )
                         )
                     except Exception as fallback_exc:  # noqa: BLE001
                         rows.append(
                             CollectionRow(
-                                year,
-                                month,
-                                period,
-                                listing_url,
-                                page_url,
-                                page_title,
-                                file_url,
-                                "html_table_fallback",
-                                "error",
-                                str(fallback_path),
-                                "error",
-                                f"Excel download failed ({download_exc}); HTML fallback failed ({fallback_exc})",
-                                now,
+                                period_year=year,
+                                period_month=month,
+                                period=period,
+                                listing_url=listing_url,
+                                report_page_url=page_url,
+                                report_title_detected=page_title,
+                                excel_file_url=file_url,
+                                source_method="html_table_fallback",
+                                html_fallback_status="error",
+                                html_fallback_path=str(fallback_path),
+                                local_file_path="",
+                                status="error",
+                                error_message=f"Excel download failed ({download_exc}); HTML fallback failed ({fallback_exc})",
+                                collected_at=now,
                             )
                         )
 
         except Exception as page_exc:  # noqa: BLE001
             rows.append(
                 CollectionRow(
-                    year,
-                    month,
-                    period,
-                    listing_url,
-                    page_url,
-                    "",
-                    "",
-                    "",
-                    "",
-                    "",
-                    "",
-                    "error",
-                    str(page_exc),
-                    now,
+                    period_year=year,
+                    period_month=month,
+                    period=period,
+                    listing_url=listing_url,
+                    report_page_url=page_url,
+                    report_title_detected="",
+                    excel_file_url="",
+                    source_method="",
+                    html_fallback_status="",
+                    html_fallback_path="",
+                    local_file_path="",
+                    status="error",
+                    error_message=str(page_exc),
+                    collected_at=now,
                 )
             )
 
     if not rows:
-        rows.append(CollectionRow(year, month, period, listing_url, "", "", "", "", "", "", "no_report_pages", "", now))
+        rows.append(
+            CollectionRow(
+                period_year=year,
+                period_month=month,
+                period=period,
+                listing_url=listing_url,
+                report_page_url="",
+                report_title_detected="",
+                excel_file_url="",
+                source_method="",
+                html_fallback_status="",
+                html_fallback_path="",
+                local_file_path="",
+                status="no_report_pages",
+                error_message="",
+                collected_at=now,
+            )
+        )
     return rows
 
 
