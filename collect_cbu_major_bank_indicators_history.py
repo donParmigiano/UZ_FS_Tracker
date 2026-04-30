@@ -17,11 +17,16 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font
+from openpyxl.utils import get_column_letter
 from urllib.parse import quote_plus, urlencode, urljoin, urlparse
 
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
+from bs4.element import Tag
 
 BASE_URL = "https://cbu.uz"
 BANKSTATS_PATH = "/en/statistics/bankstats/"
@@ -142,6 +147,145 @@ def select_largest_html_table(page_html: str) -> Optional[pd.DataFrame]:
             best_score = score
             best_df = candidate_df
     return best_df
+
+
+
+def parse_html_table_grid(table_tag: Tag) -> tuple[list[list[dict[str, object]]], int, int]:
+    grid: list[list[dict[str, object]]] = []
+    occupied: dict[tuple[int, int], bool] = {}
+    max_col = 0
+
+    rows = table_tag.find_all("tr")
+    for row_idx, tr in enumerate(rows):
+        col_idx = 0
+        while occupied.get((row_idx, col_idx), False):
+            col_idx += 1
+
+        cells = tr.find_all(["th", "td"], recursive=False)
+        for cell in cells:
+            while occupied.get((row_idx, col_idx), False):
+                col_idx += 1
+
+            rowspan = int(cell.get("rowspan", 1) or 1)
+            colspan = int(cell.get("colspan", 1) or 1)
+            cell_obj = {
+                "row": row_idx + 1,
+                "col": col_idx + 1,
+                "rowspan": rowspan,
+                "colspan": colspan,
+                "text": cell.get_text(" ", strip=True),
+                "is_header": cell.name == "th",
+            }
+
+            while len(grid) <= row_idx:
+                grid.append([])
+            grid[row_idx].append(cell_obj)
+
+            for r in range(row_idx, row_idx + rowspan):
+                for c in range(col_idx, col_idx + colspan):
+                    occupied[(r, c)] = True
+
+            col_idx += colspan
+            max_col = max(max_col, col_idx)
+
+    row_count = len(rows)
+    return grid, row_count, max_col
+
+
+def select_best_table_tag(page_html: str) -> tuple[Optional[BeautifulSoup], int, int, int]:
+    soup = BeautifulSoup(page_html, "html.parser")
+    best_table = None
+    best_rows = 0
+    best_cols = 0
+    best_score = 0
+
+    for table in soup.find_all("table"):
+        grid, rows, cols = parse_html_table_grid(table)
+        if rows == 0 or cols == 0:
+            continue
+        non_empty_cells = sum(1 for row in grid for cell in row if str(cell.get("text", "")).strip())
+        if non_empty_cells == 0:
+            continue
+        score = rows * cols
+        if score > best_score:
+            best_table = table
+            best_rows = rows
+            best_cols = cols
+            best_score = score
+
+    return best_table, best_rows, best_cols, best_score
+
+
+def create_preserved_fallback_workbook(
+    fallback_path: Path,
+    table_tag: BeautifulSoup,
+    flat_df: pd.DataFrame,
+    page_url: str,
+    page_title: str,
+    failed_excel_url: str,
+    selected_rows: int,
+    selected_cols: int,
+    selected_score: int,
+) -> None:
+    wb = Workbook()
+    ws_preserved = wb.active
+    ws_preserved.title = "raw_table_preserved"
+    ws_flat = wb.create_sheet("raw_table_flat")
+    ws_meta = wb.create_sheet("metadata")
+
+    table_grid, _, _ = parse_html_table_grid(table_tag)
+
+    for row in table_grid:
+        for cell in row:
+            row_num = int(cell["row"])
+            col_num = int(cell["col"])
+            rowspan = int(cell["rowspan"])
+            colspan = int(cell["colspan"])
+            text = str(cell["text"])
+            is_header = bool(cell["is_header"])
+
+            excel_cell = ws_preserved.cell(row=row_num, column=col_num, value=text)
+            excel_cell.alignment = Alignment(
+                wrap_text=True,
+                vertical="center",
+                horizontal="center" if (is_header or rowspan > 1 or colspan > 1) else "left",
+            )
+            if is_header:
+                excel_cell.font = Font(bold=True)
+
+            if rowspan > 1 or colspan > 1:
+                ws_preserved.merge_cells(
+                    start_row=row_num,
+                    start_column=col_num,
+                    end_row=row_num + rowspan - 1,
+                    end_column=col_num + colspan - 1,
+                )
+
+    if selected_cols > 0:
+        for col_idx in range(1, selected_cols + 1):
+            ws_preserved.column_dimensions[get_column_letter(col_idx)].width = 18
+
+    for col_idx, col_name in enumerate(flat_df.columns, start=1):
+        ws_flat.cell(row=1, column=col_idx, value=str(col_name)).font = Font(bold=True)
+    for row_idx, row_values in enumerate(flat_df.itertuples(index=False), start=2):
+        for col_idx, value in enumerate(row_values, start=1):
+            ws_flat.cell(row=row_idx, column=col_idx, value="" if pd.isna(value) else str(value))
+
+    metadata_rows = [
+        ("report_page_url", page_url),
+        ("report_title_detected", page_title),
+        ("failed_excel_url", failed_excel_url),
+        ("fallback_created_at", datetime.now(timezone.utc).isoformat()),
+        ("source_method", "html_table_fallback"),
+        ("selected_table_rows", selected_rows),
+        ("selected_table_columns", selected_cols),
+        ("selected_table_score", selected_score),
+    ]
+    for idx, (k, v) in enumerate(metadata_rows, start=1):
+        ws_meta.cell(row=idx, column=1, value=k)
+        ws_meta.cell(row=idx, column=2, value=v)
+
+    wb.save(fallback_path)
 
 
 def build_listing_url(year: int, month: int) -> str:
@@ -331,10 +475,11 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                         status_code = download_exc.response.status_code
 
                     fallback_df = select_largest_html_table(page_html)
+                    selected_table_tag, selected_rows, selected_cols, selected_score = select_best_table_tag(page_html)
                     report_id = extract_report_id(page_url)
                     fallback_path = out_dir / f"{slugify(page_title)}_{report_id}_html_fallback.xlsx"
 
-                    if fallback_df is None:
+                    if fallback_df is None or selected_table_tag is None:
                         rows.append(
                             CollectionRow(
                                 period_year=year,
@@ -377,7 +522,17 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                         continue
 
                     try:
-                        fallback_df.to_excel(fallback_path, index=False)
+                        create_preserved_fallback_workbook(
+                            fallback_path=fallback_path,
+                            table_tag=selected_table_tag,
+                            flat_df=fallback_df,
+                            page_url=page_url,
+                            page_title=page_title,
+                            failed_excel_url=file_url,
+                            selected_rows=selected_rows,
+                            selected_cols=selected_cols,
+                            selected_score=selected_score,
+                        )
                         err_suffix = f" (excel_http_status={status_code})" if status_code == 404 else ""
                         rows.append(
                             CollectionRow(
