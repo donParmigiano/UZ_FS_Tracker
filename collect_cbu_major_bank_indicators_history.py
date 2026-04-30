@@ -20,6 +20,7 @@ from typing import Optional
 from urllib.parse import quote_plus, urlencode, urljoin, urlparse
 
 import requests
+import pandas as pd
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://cbu.uz"
@@ -41,6 +42,9 @@ class CollectionRow:
     report_page_url: str
     report_title_detected: str
     excel_file_url: str
+    source_method: str
+    html_fallback_status: str
+    html_fallback_path: str
     local_file_path: str
     status: str
     error_message: str
@@ -90,7 +94,32 @@ def fetch_bytes(session: requests.Session, url: str, timeout: float = 20.0, retr
         except Exception as exc:  # noqa: BLE001
             last_error = exc
             time.sleep(0.7 * (attempt + 1))
-    raise RuntimeError(f"Failed to download URL: {url}; error={last_error}")
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError(f"Failed to download URL: {url}; error=unknown")
+
+
+def slugify(text: str) -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9]+", "_", text).strip("_").lower()
+    return cleaned[:120] if cleaned else "report"
+
+
+def extract_report_id(page_url: str) -> str:
+    match = re.search(r"/bankstats/(\d+)/", urlparse(page_url).path)
+    return match.group(1) if match else "unknown"
+
+
+def select_largest_html_table(page_html: str) -> Optional[pd.DataFrame]:
+    try:
+        tables = pd.read_html(page_html)
+    except Exception:  # noqa: BLE001
+        return None
+    if not tables:
+        return None
+    valid_tables = [df for df in tables if not df.empty and df.shape[0] > 0 and df.shape[1] > 0]
+    if not valid_tables:
+        return None
+    return max(valid_tables, key=lambda df: df.shape[0] * df.shape[1])
 
 
 def build_listing_url(year: int, month: int) -> str:
@@ -179,7 +208,7 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
         listing_html = fetch_text(session, listing_url)
     except Exception as exc:  # noqa: BLE001
         return [
-            CollectionRow(year, month, period, listing_url, "", "", "", "", "error", str(exc), now)
+            CollectionRow(year, month, period, listing_url, "", "", "", "", "", "", "error", str(exc), now)
         ]
 
     candidates = extract_candidate_report_links(listing_html, listing_url)
@@ -199,6 +228,9 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                         listing_url,
                         page_url,
                         page_title,
+                        "",
+                        "",
+                        "",
                         "",
                         "",
                         "no_excel_found",
@@ -223,6 +255,9 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                             page_url,
                             page_title,
                             file_url,
+                            "excel_download",
+                            "",
+                            "",
                             str(local_path),
                             "skipped_existing",
                             "",
@@ -243,6 +278,9 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                             page_url,
                             page_title,
                             file_url,
+                            "excel_download",
+                            "",
+                            "",
                             str(local_path),
                             "downloaded",
                             "",
@@ -251,21 +289,92 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                     )
                     time.sleep(0.2)
                 except Exception as download_exc:  # noqa: BLE001
-                    rows.append(
-                        CollectionRow(
-                            year,
-                            month,
-                            period,
-                            listing_url,
-                            page_url,
-                            page_title,
-                            file_url,
-                            str(local_path),
-                            "error",
-                            str(download_exc),
-                            now,
+                    status_code = None
+                    if isinstance(download_exc, requests.HTTPError) and download_exc.response is not None:
+                        status_code = download_exc.response.status_code
+
+                    fallback_df = select_largest_html_table(page_html)
+                    report_id = extract_report_id(page_url)
+                    fallback_path = out_dir / f"{slugify(page_title)}_{report_id}_html_fallback.xlsx"
+
+                    if fallback_df is None:
+                        rows.append(
+                            CollectionRow(
+                                year,
+                                month,
+                                period,
+                                listing_url,
+                                page_url,
+                                page_title,
+                                file_url,
+                                "html_table_fallback",
+                                "no_html_table_found",
+                                "",
+                                "no_html_table_found",
+                                f"Excel download failed ({download_exc}); no HTML table available.",
+                                now,
+                            )
                         )
-                    )
+                        continue
+
+                    if fallback_path.exists() and not overwrite:
+                        rows.append(
+                            CollectionRow(
+                                year,
+                                month,
+                                period,
+                                listing_url,
+                                page_url,
+                                page_title,
+                                file_url,
+                                "html_table_fallback",
+                                "existing",
+                                str(fallback_path),
+                                "html_fallback_skipped_existing",
+                                "",
+                                now,
+                            )
+                        )
+                        continue
+
+                    try:
+                        fallback_df.to_excel(fallback_path, index=False)
+                        err_suffix = f" (excel_http_status={status_code})" if status_code == 404 else ""
+                        rows.append(
+                            CollectionRow(
+                                year,
+                                month,
+                                period,
+                                listing_url,
+                                page_url,
+                                page_title,
+                                file_url,
+                                "html_table_fallback",
+                                "created",
+                                str(fallback_path),
+                                "html_fallback_created",
+                                f"Excel download failed ({download_exc}){err_suffix}",
+                                now,
+                            )
+                        )
+                    except Exception as fallback_exc:  # noqa: BLE001
+                        rows.append(
+                            CollectionRow(
+                                year,
+                                month,
+                                period,
+                                listing_url,
+                                page_url,
+                                page_title,
+                                file_url,
+                                "html_table_fallback",
+                                "error",
+                                str(fallback_path),
+                                "error",
+                                f"Excel download failed ({download_exc}); HTML fallback failed ({fallback_exc})",
+                                now,
+                            )
+                        )
 
         except Exception as page_exc:  # noqa: BLE001
             rows.append(
@@ -278,6 +387,9 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                     "",
                     "",
                     "",
+                    "",
+                    "",
+                    "",
                     "error",
                     str(page_exc),
                     now,
@@ -285,7 +397,7 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
             )
 
     if not rows:
-        rows.append(CollectionRow(year, month, period, listing_url, "", "", "", "", "no_report_pages", "", now))
+        rows.append(CollectionRow(year, month, period, listing_url, "", "", "", "", "", "", "no_report_pages", "", now))
     return rows
 
 
@@ -302,6 +414,9 @@ def write_report(rows: list[CollectionRow]) -> None:
                 "report_page_url",
                 "report_title_detected",
                 "excel_file_url",
+                "source_method",
+                "html_fallback_status",
+                "html_fallback_path",
                 "local_file_path",
                 "status",
                 "error_message",
@@ -318,6 +433,9 @@ def write_report(rows: list[CollectionRow]) -> None:
                     row.report_page_url,
                     row.report_title_detected,
                     row.excel_file_url,
+                    row.source_method,
+                    row.html_fallback_status,
+                    row.html_fallback_path,
                     row.local_file_path,
                     row.status,
                     row.error_message,
