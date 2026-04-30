@@ -364,6 +364,112 @@ def filename_from_url(url: str) -> str:
     return f"download_{quote_plus(url)}.xlsx"
 
 
+def try_html_fallback(
+    *,
+    page_html: str,
+    out_dir: Path,
+    page_url: str,
+    page_title: str,
+    excel_file_url: str,
+    overwrite: bool,
+    no_excel_message_prefix: str = "",
+    download_exc: Optional[Exception] = None,
+) -> CollectionRow:
+    fallback_df = select_largest_html_table(page_html)
+    selected_table_tag, selected_rows, selected_cols, selected_score = select_best_table_tag(page_html)
+    report_id = extract_report_id(page_url)
+    fallback_path = out_dir / f"{slugify(page_title)}_{report_id}_html_fallback.xlsx"
+
+    status_prefix = no_excel_message_prefix.strip()
+    if status_prefix:
+        status_prefix = f"{status_prefix} "
+
+    if fallback_df is None or selected_table_tag is None:
+        error_message = "No usable HTML table found."
+        if download_exc is not None:
+            error_message = f"Excel download failed ({download_exc}); no HTML table available."
+        elif status_prefix:
+            error_message = "No Excel link found and no usable HTML table found."
+        return CollectionRow(
+            period_year=0,
+            period_month=0,
+            period="",
+            listing_url="",
+            report_page_url=page_url,
+            report_title_detected=page_title,
+            excel_file_url=excel_file_url,
+            source_method="html_table_fallback",
+            html_fallback_status="no_html_table_found",
+            html_fallback_path="",
+            local_file_path="",
+            status="no_html_table_found",
+            error_message=error_message,
+            collected_at="",
+        )
+
+    if fallback_path.exists() and not overwrite:
+        error_message = "Reused existing HTML fallback file."
+        if download_exc is not None:
+            error_message = f"Excel download failed ({download_exc}); reused existing HTML fallback file."
+        elif status_prefix:
+            error_message = "No Excel link found; reused existing HTML fallback file."
+        return CollectionRow(
+            period_year=0,
+            period_month=0,
+            period="",
+            listing_url="",
+            report_page_url=page_url,
+            report_title_detected=page_title,
+            excel_file_url=excel_file_url,
+            source_method="html_table_fallback",
+            html_fallback_status="existing",
+            html_fallback_path=str(fallback_path),
+            local_file_path=str(fallback_path),
+            status="html_fallback_skipped_existing",
+            error_message=error_message,
+            collected_at="",
+        )
+
+    create_preserved_fallback_workbook(
+        fallback_path=fallback_path,
+        table_tag=selected_table_tag,
+        flat_df=fallback_df,
+        page_url=page_url,
+        page_title=page_title,
+        failed_excel_url=excel_file_url,
+        selected_rows=selected_rows,
+        selected_cols=selected_cols,
+        selected_score=selected_score,
+    )
+
+    error_message = "Created fallback from HTML table."
+    if download_exc is not None:
+        status_code = None
+        if isinstance(download_exc, requests.HTTPError) and download_exc.response is not None:
+            status_code = download_exc.response.status_code
+        err_suffix = f" (excel_http_status={status_code})" if status_code == 404 else ""
+        error_message = f"Excel download failed ({download_exc}){err_suffix}; created fallback from HTML table."
+    elif status_prefix:
+        error_message = "No Excel link found; HTML table fallback created."
+
+    return CollectionRow(
+        period_year=0,
+        period_month=0,
+        period="",
+        listing_url="",
+        report_page_url=page_url,
+        report_title_detected=page_title,
+        excel_file_url=excel_file_url,
+        source_method="html_table_fallback",
+        html_fallback_status="created",
+        html_fallback_path=str(fallback_path),
+        local_file_path=str(fallback_path),
+        status="html_fallback_created",
+        error_message=error_message,
+        collected_at="",
+    )
+
+
 def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow]:
     session = create_session()
     now = datetime.now(timezone.utc).isoformat()
@@ -401,6 +507,17 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
             page_title, excel_links = extract_excel_links(page_html, page_url)
             print(f"[PAGE] url={page_url} excel_links_found={len(excel_links)}")
             if not excel_links:
+                out_dir = RAW_ROOT / f"{year:04d}_{month:02d}"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                fallback_row = try_html_fallback(
+                    page_html=page_html,
+                    out_dir=out_dir,
+                    page_url=page_url,
+                    page_title=page_title,
+                    excel_file_url="",
+                    overwrite=overwrite,
+                    no_excel_message_prefix="No Excel link found;",
+                )
                 rows.append(
                     CollectionRow(
                         period_year=year,
@@ -410,12 +527,12 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                         report_page_url=page_url,
                         report_title_detected=page_title,
                         excel_file_url="",
-                        source_method="",
-                        html_fallback_status="",
-                        html_fallback_path="",
-                        local_file_path="",
-                        status="no_excel_found",
-                        error_message="No .xls/.xlsx link found on report page.",
+                        source_method=fallback_row.source_method,
+                        html_fallback_status=fallback_row.html_fallback_status,
+                        html_fallback_path=fallback_row.html_fallback_path,
+                        local_file_path=fallback_row.local_file_path,
+                        status=fallback_row.status,
+                        error_message=fallback_row.error_message,
                         collected_at=now,
                     )
                 )
@@ -470,70 +587,16 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                     )
                     time.sleep(0.2)
                 except Exception as download_exc:  # noqa: BLE001
-                    status_code = None
-                    if isinstance(download_exc, requests.HTTPError) and download_exc.response is not None:
-                        status_code = download_exc.response.status_code
-
-                    fallback_df = select_largest_html_table(page_html)
-                    selected_table_tag, selected_rows, selected_cols, selected_score = select_best_table_tag(page_html)
-                    report_id = extract_report_id(page_url)
-                    fallback_path = out_dir / f"{slugify(page_title)}_{report_id}_html_fallback.xlsx"
-
-                    if fallback_df is None or selected_table_tag is None:
-                        rows.append(
-                            CollectionRow(
-                                period_year=year,
-                                period_month=month,
-                                period=period,
-                                listing_url=listing_url,
-                                report_page_url=page_url,
-                                report_title_detected=page_title,
-                                excel_file_url=file_url,
-                                source_method="html_table_fallback",
-                                html_fallback_status="no_html_table_found",
-                                html_fallback_path="",
-                                local_file_path="",
-                                status="no_html_table_found",
-                                error_message=f"Excel download failed ({download_exc}); no HTML table available.",
-                                collected_at=now,
-                            )
-                        )
-                        continue
-
-                    if fallback_path.exists() and not overwrite:
-                        rows.append(
-                            CollectionRow(
-                                period_year=year,
-                                period_month=month,
-                                period=period,
-                                listing_url=listing_url,
-                                report_page_url=page_url,
-                                report_title_detected=page_title,
-                                excel_file_url=file_url,
-                                source_method="html_table_fallback",
-                                html_fallback_status="existing",
-                                html_fallback_path=str(fallback_path),
-                                local_file_path=str(fallback_path),
-                                status="html_fallback_skipped_existing",
-                                error_message=f"Excel download failed ({download_exc}); reused existing HTML fallback file.",
-                                collected_at=now,
-                            )
-                        )
-                        continue
-
                     try:
-                        create_preserved_fallback_workbook(
-                            fallback_path=fallback_path,
-                            table_tag=selected_table_tag,
-                            flat_df=fallback_df,
+                        fallback_row = try_html_fallback(
+                            page_html=page_html,
+                            out_dir=out_dir,
                             page_url=page_url,
                             page_title=page_title,
-                            failed_excel_url=file_url,
-                            selected_rows=selected_rows,
-                            selected_cols=selected_cols,
-                            selected_score=selected_score,
+                            excel_file_url=file_url,
+                            overwrite=overwrite,
+                            download_exc=download_exc,
                         )
-                        err_suffix = f" (excel_http_status={status_code})" if status_code == 404 else ""
                         rows.append(
                             CollectionRow(
                                 period_year=year,
@@ -543,12 +606,12 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                                 report_page_url=page_url,
                                 report_title_detected=page_title,
                                 excel_file_url=file_url,
-                                source_method="html_table_fallback",
-                                html_fallback_status="created",
-                                html_fallback_path=str(fallback_path),
-                                local_file_path=str(fallback_path),
-                                status="html_fallback_created",
-                                error_message=f"Excel download failed ({download_exc}){err_suffix}; created fallback from HTML table.",
+                                source_method=fallback_row.source_method,
+                                html_fallback_status=fallback_row.html_fallback_status,
+                                html_fallback_path=fallback_row.html_fallback_path,
+                                local_file_path=fallback_row.local_file_path,
+                                status=fallback_row.status,
+                                error_message=fallback_row.error_message,
                                 collected_at=now,
                             )
                         )
@@ -564,7 +627,7 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                                 excel_file_url=file_url,
                                 source_method="html_table_fallback",
                                 html_fallback_status="error",
-                                html_fallback_path=str(fallback_path),
+                                html_fallback_path="",
                                 local_file_path="",
                                 status="error",
                                 error_message=f"Excel download failed ({download_exc}); HTML fallback failed ({fallback_exc})",
