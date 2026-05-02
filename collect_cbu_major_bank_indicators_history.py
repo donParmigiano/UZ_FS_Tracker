@@ -306,6 +306,19 @@ def build_listing_url(year: int, month: int) -> str:
     return f"{BASE_URL}{BANKSTATS_PATH}?{urlencode(query_items)}"
 
 
+def normalize_report_page_url(url: str, base_url: str) -> Optional[str]:
+    joined_url = urljoin(base_url, url)
+    parsed = urlparse(joined_url)
+    normalized_path = re.sub(r"/+", "/", parsed.path)
+    match = re.search(r"/(?:en/)?statistics/bankstats/(\d+)/?", normalized_path)
+    if not match:
+        return None
+    report_id = match.group(1)
+    language_prefix = "en/" if normalized_path.startswith("/en/") else ""
+    canonical_path = f"/{language_prefix}statistics/bankstats/{report_id}/"
+    return parsed._replace(path=canonical_path, params="", query="", fragment="").geturl()
+
+
 def is_valid_report_page(url: str) -> bool:
     path = urlparse(url).path
     return bool(re.fullmatch(r"/(?:en/)?statistics/bankstats/\d+/", path))
@@ -313,19 +326,36 @@ def is_valid_report_page(url: str) -> bool:
 
 def extract_candidate_report_links(listing_html: str, listing_url: str) -> list[str]:
     soup = BeautifulSoup(listing_html, "html.parser")
-    results: set[str] = set()
+    raw_links: list[tuple[str, str]] = []
+
     for a_tag in soup.find_all("a", href=True):
         href = a_tag.get("href", "")
-        full_url = urljoin(listing_url, href)
-        if is_valid_report_page(full_url):
-            results.add(full_url)
-    for match in re.findall(r"""(?:"|')(\/(?:en\/)?statistics\/bankstats\/\d+\/)(?:\?|#|(?:"|'))""", listing_html):
-        full_url = urljoin(listing_url, match)
-        if is_valid_report_page(full_url):
-            results.add(full_url)
-    found = sorted(results)
+        raw_links.append((href, a_tag.get_text(" ", strip=True)))
+
+    for match in re.findall(r"""(?:"|')(\/(?:en\/)?statistics\/bankstats\/\d+\/?(?:\?[^"'#]*)?(?:#[^"']*)?)(?:"|')""", listing_html):
+        raw_links.append((match, ""))
+
+    unique_urls: dict[str, str] = {}
+    duplicate_urls_removed = 0
+    raw_report_links_found = 0
+
+    for raw_href, title_text in raw_links:
+        normalized_url = normalize_report_page_url(raw_href, listing_url)
+        if not normalized_url:
+            continue
+        if not is_valid_report_page(urlparse(normalized_url)._replace(query="", fragment="").geturl()):
+            continue
+        raw_report_links_found += 1
+        if normalized_url in unique_urls:
+            duplicate_urls_removed += 1
+            continue
+        unique_urls[normalized_url] = title_text
+
+    found = sorted(unique_urls.keys())
     print(f"[SCAN] listing={listing_url}")
-    print(f"[SCAN] report_pages_found={len(found)}")
+    print(f"[SCAN] raw_report_links_found={raw_report_links_found}")
+    print(f"[SCAN] unique_report_urls_kept={len(found)}")
+    print(f"[SCAN] duplicate_report_urls_removed={duplicate_urls_removed}")
     print(f"[SCAN] report_page_urls={found}")
     return found
 
