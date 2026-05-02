@@ -21,7 +21,7 @@ from typing import Optional
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
-from urllib.parse import quote_plus, urlencode, urljoin, urlparse
+from urllib.parse import urlencode, urljoin, urlparse
 
 import requests
 import pandas as pd
@@ -386,12 +386,22 @@ def extract_excel_links(page_html: str, page_url: str) -> tuple[str, list[str]]:
     return page_title, sorted(excel_links)
 
 
-def filename_from_url(url: str) -> str:
+def filename_from_url(url: str, page_url: str) -> str:
+    report_id = extract_report_id(page_url)
     path = urlparse(url).path
-    name = Path(path).name
-    if name:
-        return name
-    return f"download_{quote_plus(url)}.xlsx"
+    raw_name = Path(path).name
+
+    if raw_name:
+        parsed_name = Path(raw_name)
+        stem = parsed_name.stem.strip()
+        extension = parsed_name.suffix.strip()
+
+        stem_is_safe = bool(re.fullmatch(r"[A-Za-z0-9._-]+", stem))
+        extension_is_safe = extension.lower() in {".xlsx", ".xls"}
+        if stem and stem_is_safe and extension_is_safe:
+            return f"{stem}_{report_id}{extension.lower()}"
+
+    return f"report_{report_id}.xlsx"
 
 
 def try_html_fallback(
@@ -571,7 +581,7 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
             for file_url in excel_links:
                 out_dir = RAW_ROOT / f"{year:04d}_{month:02d}"
                 out_dir.mkdir(parents=True, exist_ok=True)
-                local_path = out_dir / filename_from_url(file_url)
+                local_path = out_dir / filename_from_url(file_url, page_url)
 
                 if local_path.exists() and not overwrite:
                     rows.append(
