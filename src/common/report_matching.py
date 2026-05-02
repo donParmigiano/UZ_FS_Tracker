@@ -119,7 +119,11 @@ def normalize_report_name(file_name: str) -> str:
     text = re.sub(r"\s+as of\s+.*$", "", text)
 
     # Remove common suffix markers.
-    text = re.sub(r"\s+(html fallback|en|june|july|aug|september)\s*$", "", text)
+    text = re.sub(
+        r"\s+(html fallback|en|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s*$",
+        "",
+        text,
+    )
 
     # Remove trailing numeric IDs (e.g. "... 1234").
     text = re.sub(r"\s+\d{2,}\s*$", "", text)
