@@ -480,7 +480,7 @@ def try_html_fallback(
         err_suffix = f" (excel_http_status={status_code})" if status_code == 404 else ""
         error_message = f"Excel download failed ({download_exc}){err_suffix}; created fallback from HTML table."
     elif status_prefix:
-        error_message = "No Excel link found; HTML table fallback created."
+        error_message = "No Excel link found; created fallback from HTML table."
 
     return CollectionRow(
         period_year=0,
@@ -546,7 +546,7 @@ def collect_period(year: int, month: int, overwrite: bool) -> list[CollectionRow
                     page_title=page_title,
                     excel_file_url="",
                     overwrite=overwrite,
-                    no_excel_message_prefix="No Excel link found;",
+                    no_excel_message_prefix="No Excel link found",
                 )
                 rows.append(
                     CollectionRow(
