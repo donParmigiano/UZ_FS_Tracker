@@ -5,8 +5,8 @@ import csv
 ROOT = Path(r"C:\Users\skadyrbekov\OneDrive - KPMG\Desktop\UZ_FS_Tracker_git\data\raw\cbu_bankstats")
 OUT = Path(r"C:\Users\skadyrbekov\OneDrive - KPMG\Desktop\UZ_FS_Tracker_git\data\processed\raw_excel_structure_fingerprint.csv")
 
-MAX_ROWS = 15
-MAX_COLS = 15
+MAX_ROWS = 30
+MAX_COLS = 20
 
 rows = []
 
