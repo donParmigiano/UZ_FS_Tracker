@@ -16,13 +16,13 @@ from pathlib import Path
 from typing import Optional
 
 from openpyxl import load_workbook
+from src.common.report_matching import match_report_key
 
 
 RAW_ROOT = Path("data/raw/cbu_bankstats")
 MASTER_OUTPUT = Path("data/master/cbu_major_bank_indicators_master.csv")
 NORMALIZED_OUTPUT = Path("data/processed/normalized/major_bank_indicators.csv")
 QA_OUTPUT = Path("data/master/cbu_major_bank_indicators_parse_qa.csv")
-FILE_NAME_CORE_PHRASE = "information on major indicators of commercial banks"
 REPORT_KEY = "major_bank_indicators"
 
 
@@ -74,8 +74,8 @@ def find_input_files(root_dir: Path) -> list[Path]:
         suffix = path.suffix.lower()
         if suffix not in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
             continue
-        normalized_name = path.stem.replace('-', ' ').replace('_', ' ').lower()
-        if FILE_NAME_CORE_PHRASE in normalized_name:
+        file_match = match_report_key(path.name)
+        if file_match.get("report_key") == REPORT_KEY:
             matching.append(path)
     return sorted(matching)
 
@@ -308,8 +308,8 @@ def main() -> None:
     files = find_input_files(RAW_ROOT)
     if not files:
         raise SystemExit(
-            "No matching Excel files found under data/raw/cbu_bankstats/ with filename containing "
-            f"'{FILE_NAME_CORE_PHRASE}'."
+            "No matching Excel files found under data/raw/cbu_bankstats/ for "
+            f"report_key='{REPORT_KEY}'."
         )
 
     loaded_at = datetime.now(timezone.utc).isoformat()
