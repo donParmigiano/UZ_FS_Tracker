@@ -10,7 +10,8 @@ from pathlib import Path
 
 import pandas as pd
 
-INPUT_CSV = Path("data/processed/raw_report_matching_summary.csv")
+SUMMARY_CSV = Path("data/processed/raw_report_matching_summary.csv")
+AUDIT_CSV = Path("data/processed/raw_report_matching_audit.csv")
 OUTPUT_CSV = Path("data/processed/report_coverage_matrix.csv")
 
 # Priority buckets requested for dashboard planning.
@@ -72,22 +73,43 @@ def normalize_bool_flag(value: object) -> bool:
 
 
 def main() -> None:
-    if not INPUT_CSV.exists():
+    if not SUMMARY_CSV.exists():
         raise FileNotFoundError(
-            f"Input file not found: {INPUT_CSV}. Run analyze_raw_excel_report_matching.py first."
+            f"Input file not found: {SUMMARY_CSV}. Run analyze_raw_excel_report_matching.py first."
+        )
+    if not AUDIT_CSV.exists():
+        raise FileNotFoundError(
+            f"Input file not found: {AUDIT_CSV}. Run analyze_raw_excel_report_matching.py first."
         )
 
-    df = pd.read_csv(INPUT_CSV)
+    summary_df = pd.read_csv(SUMMARY_CSV)
+    audit_df = pd.read_csv(AUDIT_CSV)
 
-    if "report_key" not in df.columns:
-        raise ValueError("Input CSV must include a 'report_key' column.")
+    if "report_key" not in summary_df.columns:
+        raise ValueError("Summary CSV must include a 'report_key' column.")
+    if "report_key" not in audit_df.columns:
+        raise ValueError("Audit CSV must include a 'report_key' column.")
 
     # Keep report_key consistent for grouping.
-    df["report_key"] = df["report_key"].fillna("unknown").astype(str)
+    summary_df["report_key"] = summary_df["report_key"].fillna("unknown").astype(str)
+    audit_df["report_key"] = audit_df["report_key"].fillna("unknown").astype(str)
 
-    # Aggregate into one row per report_key.
+    # Build a simple lookup table for confidence counts from the audit file.
+    # We aggregate first so that duplicate report keys still become one final row.
+    audit_totals = (
+        audit_df.groupby("report_key", dropna=False)
+        .agg(
+            high_confidence_rows=("high_confidence_rows", "sum"),
+            medium_confidence_rows=("medium_confidence_rows", "sum"),
+            unmatched_rows=("unmatched_rows", "sum"),
+        )
+        .fillna(0)
+        .astype(int)
+    )
+
+    # Aggregate summary data into one row per report_key.
     rows = []
-    for report_key, group in df.groupby("report_key", dropna=False):
+    for report_key, group in summary_df.groupby("report_key", dropna=False):
         file_count = int(group["file_count"].sum()) if "file_count" in group.columns else int(len(group))
 
         first_period = group["first_period"].min() if "first_period" in group.columns else ""
@@ -107,25 +129,14 @@ def main() -> None:
         else:
             sheet_count_total = 0
 
-        if "high_confidence_rows" in group.columns:
-            high_confidence_rows = int(group["high_confidence_rows"].sum())
-        elif "match_confidence" in group.columns:
-            high_confidence_rows = int((group["match_confidence"] == "high").sum())
+        # Confidence totals must come from the audit file (not the summary file).
+        if report_key in audit_totals.index:
+            high_confidence_rows = int(audit_totals.loc[report_key, "high_confidence_rows"])
+            medium_confidence_rows = int(audit_totals.loc[report_key, "medium_confidence_rows"])
+            unmatched_rows = int(audit_totals.loc[report_key, "unmatched_rows"])
         else:
             high_confidence_rows = 0
-
-        if "medium_confidence_rows" in group.columns:
-            medium_confidence_rows = int(group["medium_confidence_rows"].sum())
-        elif "match_confidence" in group.columns:
-            medium_confidence_rows = int((group["match_confidence"] == "medium").sum())
-        else:
             medium_confidence_rows = 0
-
-        if "unmatched_rows" in group.columns:
-            unmatched_rows = int(group["unmatched_rows"].sum())
-        elif "match_confidence" in group.columns:
-            unmatched_rows = int((group["match_confidence"] == "unmatched").sum())
-        else:
             unmatched_rows = 0
 
         if "has_html_fallback" in group.columns:
