@@ -94,15 +94,26 @@ def main() -> None:
     summary_df["report_key"] = summary_df["report_key"].fillna("unknown").astype(str)
     audit_df["report_key"] = audit_df["report_key"].fillna("unknown").astype(str)
 
-    # Build a simple lookup table for confidence counts from the audit file.
-    # We aggregate first so that duplicate report keys still become one final row.
+    # Create helper count columns in the audit data *before* aggregation.
+    # This avoids KeyError when source files do not already include those columns.
+    audit_df["high_confidence_rows"] = (audit_df.get("match_confidence", "").astype(str) == "high").astype(int)
+    audit_df["medium_confidence_rows"] = (audit_df.get("match_confidence", "").astype(str) == "medium").astype(int)
+    audit_df["unmatched_rows"] = (audit_df["report_key"] == "unknown").astype(int)
+
+    # Group the audit rows so each report_key has summed confidence counts.
     audit_totals = (
-        audit_df.groupby("report_key", dropna=False)
-        .agg(
-            high_confidence_rows=("high_confidence_rows", "sum"),
-            medium_confidence_rows=("medium_confidence_rows", "sum"),
-            unmatched_rows=("unmatched_rows", "sum"),
-        )
+        audit_df.groupby("report_key", dropna=False)[
+            ["high_confidence_rows", "medium_confidence_rows", "unmatched_rows"]
+        ]
+        .sum()
+        .astype(int)
+        .reset_index()
+    )
+
+    # Merge grouped audit counts into the summary frame by report_key.
+    summary_df = summary_df.merge(audit_totals, on="report_key", how="left")
+    summary_df[["high_confidence_rows", "medium_confidence_rows", "unmatched_rows"]] = (
+        summary_df[["high_confidence_rows", "medium_confidence_rows", "unmatched_rows"]]
         .fillna(0)
         .astype(int)
     )
@@ -129,15 +140,10 @@ def main() -> None:
         else:
             sheet_count_total = 0
 
-        # Confidence totals must come from the audit file (not the summary file).
-        if report_key in audit_totals.index:
-            high_confidence_rows = int(audit_totals.loc[report_key, "high_confidence_rows"])
-            medium_confidence_rows = int(audit_totals.loc[report_key, "medium_confidence_rows"])
-            unmatched_rows = int(audit_totals.loc[report_key, "unmatched_rows"])
-        else:
-            high_confidence_rows = 0
-            medium_confidence_rows = 0
-            unmatched_rows = 0
+        # Confidence totals were merged into summary_df from audit totals above.
+        high_confidence_rows = int(group["high_confidence_rows"].sum())
+        medium_confidence_rows = int(group["medium_confidence_rows"].sum())
+        unmatched_rows = int(group["unmatched_rows"].sum())
 
         if "has_html_fallback" in group.columns:
             has_html_fallback = bool(group["has_html_fallback"].apply(normalize_bool_flag).any())
