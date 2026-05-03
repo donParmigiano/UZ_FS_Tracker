@@ -118,12 +118,15 @@ def normalize_report_name(file_name: str) -> str:
     # Remove date phrases after "as of ..." which are non-essential for report identity.
     text = re.sub(r"\s+as of\s+.*$", "", text)
 
-    # Remove common suffix markers.
-    text = re.sub(
-        r"\s+(html fallback|en|january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s*$",
-        "",
-        text,
+    # Remove common trailing noise markers (language/month/html fallback),
+    # including repeated combinations like "... september en".
+    trailing_noise_pattern = (
+        r"(?:html fallback|"
+        r"january|february|march|april|may|june|july|august|september|october|november|december|"
+        r"jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec|"
+        r"en|eng|english|uz|uzb|ru|rus)"
     )
+    text = re.sub(rf"(?:\s+{trailing_noise_pattern})+\s*$", "", text)
 
     # Remove trailing numeric IDs (e.g. "... 1234").
     text = re.sub(r"\s+\d{2,}\s*$", "", text)
