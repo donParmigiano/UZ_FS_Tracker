@@ -20,8 +20,10 @@ from openpyxl import load_workbook
 
 RAW_ROOT = Path("data/raw/cbu_bankstats")
 MASTER_OUTPUT = Path("data/master/cbu_major_bank_indicators_master.csv")
+NORMALIZED_OUTPUT = Path("data/processed/normalized/major_bank_indicators.csv")
 QA_OUTPUT = Path("data/master/cbu_major_bank_indicators_parse_qa.csv")
 FILE_NAME_CORE_PHRASE = "information on major indicators of commercial banks"
+REPORT_KEY = "major_bank_indicators"
 
 
 @dataclass
@@ -31,8 +33,11 @@ class ParsedRow:
     period: str
     bank_group: str
     bank_name: str
+    report_key: str
     indicator: str
     metric_type: str
+    metric_code: str
+    metric_name: str
     value: float
     unit: str
     source_file: str
@@ -116,6 +121,13 @@ def parse_number(value: object) -> Optional[float]:
         return None
 
 
+def build_metric_code(indicator: str, metric_type: str) -> str:
+    combined = f"{indicator}_{metric_type}".lower()
+    combined = re.sub(r"[^a-z0-9]+", "_", combined)
+    combined = re.sub(r"_+", "_", combined)
+    return combined.strip("_")
+
+
 def parse_workbook(file_path: Path, loaded_at: str) -> tuple[list[ParsedRow], QAEntry]:
     year, month, period = find_period_from_path(file_path)
     if year is None or month is None or period is None:
@@ -176,8 +188,11 @@ def parse_workbook(file_path: Path, loaded_at: str) -> tuple[list[ParsedRow], QA
                     period=period,
                     bank_group=current_bank_group,
                     bank_name=bank_name,
+                    report_key=REPORT_KEY,
                     indicator=indicator,
                     metric_type=metric_type,
+                    metric_code=build_metric_code(indicator=indicator, metric_type=metric_type),
+                    metric_name=f"{indicator.title()} - {metric_type}",
                     value=number,
                     unit=unit,
                     source_file=str(file_path),
@@ -216,8 +231,11 @@ def write_master(rows: list[ParsedRow], output_path: Path) -> None:
                 "period",
                 "bank_group",
                 "bank_name",
+                "report_key",
                 "indicator",
                 "metric_type",
+                "metric_code",
+                "metric_name",
                 "value",
                 "unit",
                 "source_file",
@@ -234,8 +252,11 @@ def write_master(rows: list[ParsedRow], output_path: Path) -> None:
                     row.period,
                     row.bank_group,
                     row.bank_name,
+                    row.report_key,
                     row.indicator,
                     row.metric_type,
+                    row.metric_code,
+                    row.metric_name,
                     row.value,
                     row.unit,
                     row.source_file,
@@ -244,6 +265,23 @@ def write_master(rows: list[ParsedRow], output_path: Path) -> None:
                     row.loaded_at,
                 ]
             )
+
+
+def validate_rows(rows: list[ParsedRow]) -> list[str]:
+    warnings: list[str] = []
+    if not rows:
+        warnings.append("Validation failed: output is completely empty.")
+        return warnings
+
+    if any(not row.period for row in rows):
+        warnings.append("Validation warning: some rows have null/empty period.")
+    if any(not row.bank_name for row in rows):
+        warnings.append("Validation warning: some rows have null/empty bank_name.")
+    if any(not row.metric_code for row in rows):
+        warnings.append("Validation warning: some rows have null/empty metric_code.")
+    if any(row.value is None for row in rows):
+        warnings.append("Validation warning: some rows have null value.")
+    return warnings
 
 
 def write_qa(rows: list[QAEntry], output_path: Path) -> None:
@@ -258,10 +296,10 @@ def write_qa(rows: list[QAEntry], output_path: Path) -> None:
 def main() -> None:
     args = parse_args()
 
-    if (MASTER_OUTPUT.exists() or QA_OUTPUT.exists()) and not args.overwrite:
+    if (MASTER_OUTPUT.exists() or QA_OUTPUT.exists() or NORMALIZED_OUTPUT.exists()) and not args.overwrite:
         raise SystemExit(
             "Output file already exists. Re-run with --overwrite to replace: "
-            f"{MASTER_OUTPUT} and/or {QA_OUTPUT}"
+            f"{MASTER_OUTPUT} and/or {NORMALIZED_OUTPUT} and/or {QA_OUTPUT}"
         )
 
     if not RAW_ROOT.exists():
@@ -284,11 +322,19 @@ def main() -> None:
         master_rows.extend(parsed_rows)
         qa_rows.append(qa_entry)
 
+    validation_warnings = validate_rows(master_rows)
+    for warning in validation_warnings:
+        print(warning)
+    if not master_rows:
+        raise SystemExit("No parsed rows to write; stopping because output is empty.")
+
     write_master(master_rows, MASTER_OUTPUT)
+    write_master(master_rows, NORMALIZED_OUTPUT)
     write_qa(qa_rows, QA_OUTPUT)
 
     print(f"Parsed {len(files)} file(s).")
     print(f"Master rows written: {len(master_rows)} -> {MASTER_OUTPUT}")
+    print(f"Normalized rows written: {len(master_rows)} -> {NORMALIZED_OUTPUT}")
     print(f"QA rows written: {len(qa_rows)} -> {QA_OUTPUT}")
 
 
